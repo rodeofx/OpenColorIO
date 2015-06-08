@@ -150,7 +150,7 @@ OCIO_NAMESPACE_ENTER
             if (text.compare("Matrix") == 0) {
                 return XMLTagHandlerRcPtr(new MatrixTagHandler());
             }
-            return XMLTagHandlerRcPtr(NULL);
+            return XMLTagHandlerRcPtr(static_cast<XMLTagHandler*>(NULL));
         }
 
         ////////////////////////////////////////////////////////////////
