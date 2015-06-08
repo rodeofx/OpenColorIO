@@ -124,8 +124,17 @@ OCIO_NAMESPACE_ENTER
             virtual CachedOpRcPtr handleXMLTag(TiXmlElement * element) {
                 MatrixCachedOp * cachedOp = new MatrixCachedOp;
 
-                // The first child should be an <array> tag
+                // Find the Array XML tag
                 TiXmlElement *arrayElement = element->FirstChildElement();
+                while(arrayElement && arrayElement->ValueStr().compare("Array") != 0){
+                    arrayElement = arrayElement->NextSiblingElement();
+                };
+
+                if (!arrayElement){
+                    std::ostringstream os;
+                    os << "Matrix Parsing Error: could not find XML Array element !";
+                    throw Exception(os.str().c_str());
+                }
 
                 // Read the matrix tokens into our matrix array
                 // TODO: if the matrix specified is only 3x3, extrapolate to 4x4
