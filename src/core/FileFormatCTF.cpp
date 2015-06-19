@@ -28,6 +28,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <tinyxml.h>
 #include <stdio.h>
+#include <vector>
 
 #include <OpenColorIO/OpenColorIO.h>
 
@@ -110,12 +111,87 @@ OCIO_NAMESPACE_ENTER
             class MatrixCachedOp : public CachedOp
             {
             public:
-                float m_m44[16];
+                const unsigned short DIM_SIZE;
+                const unsigned short MTX_SIZE;
+                const unsigned short MTX_DIM;
+                // Dimension and matrix members
+                std::vector<unsigned short> m_dim;
+                std::vector<float> m_m44;
+
+                MatrixCachedOp() : DIM_SIZE(3), MTX_DIM(4), MTX_SIZE(16)
+                {
+                    // Default values
+                    const unsigned short default_dimension[] = {3, 3, 3};
+                    const float default_matrix[] = {1.f, 0.f, 0.f, 0.f,
+                                                    0.f, 1.f, 0.f, 0.f,
+                                                    0.f, 0.f, 1.f, 0.f,
+                                                    0.f, 0.f, 0.f, 1.f};
+                    // Init members to default values
+                    this->m_dim.assign(&default_dimension[0],
+                                       &default_dimension[0] + DIM_SIZE);
+                    this->m_m44.assign(&default_matrix[0],
+                                       &default_matrix[0] + MTX_SIZE);
+                }
 
                 /// Turns the cached data into an Op and adds it to the vector of
                 /// Ops
                 virtual void buildFinalOp(OpRcPtrVec &ops, TransformDirection dir) {
                     CreateMatrixOp(ops, &m_m44[0], dir);
+                }
+
+                // Parse string to fill vector considering input data size
+                // Ex: fill the 4x4 matrix member with a 3x4 input matrix
+                template <typename T>
+                void fillVectorFromString(std::vector<T> &v, const char * str,
+                                          const unsigned short inColSize)
+                {
+                    std::istringstream is(str);
+                    int i = 0;
+                    int j = 1;
+                    int delta = this->MTX_DIM - inColSize;
+                    while (!is.eof() && i < v.size()) {
+                        T token;
+                        is >> token;
+                        v[i++] = token;
+                        if (i >= inColSize*j + (j-delta))
+                        {
+                            i += delta;
+                            ++j;
+                        }
+                    }
+                }
+
+                template <typename T>
+                void fillVectorFromString(std::vector<T> &v, const char * str)
+                {
+                    fillVectorFromString(v, str, v.size());
+                }
+
+                // Check dimensions.
+                // Specs possible dimensions 3x3 3, 3x4 3 ; OCIO matrix op can
+                // handle 4x4 4.
+                // TODO check if we really want to support 4x4 while not
+                // defined by specs.
+                void checkDimension()
+                {
+                    unsigned short valid_dims[3][3] = {{3, 3 ,3},
+                                                       {3, 4, 3},
+                                                       {4, 4, 4}};
+                    for (int i=0; i < 3 ; ++i)
+                    {
+                        std::vector<unsigned short> valid_dim;
+                        valid_dim.assign(&valid_dims[i][0],
+                                         &valid_dims[i][0] + DIM_SIZE);
+                        if (std::equal(this->m_dim.begin(),
+                                       this->m_dim.begin() + DIM_SIZE,
+                                       valid_dim.begin()))
+                            return;
+                    }
+                    std::ostringstream os;
+                    os << "Matrix Parsing Error: wrong dimension ("
+                       << this->m_dim[0] << "x" << this->m_dim[1] << " "
+                       << this->m_dim[2] <<  ")";
+                    throw Exception(os.str().c_str());
                 }
             };
 
@@ -137,15 +213,15 @@ OCIO_NAMESPACE_ENTER
                 }
 
                 // Read the matrix tokens into our matrix array
-                // TODO: if the matrix specified is only 3x3, extrapolate to 4x4
-                std::istringstream is(arrayElement->GetText());
-                int i = 0;
-                while (!is.eof()) {
-                    double token;
-                    is >> token;
-
-                    cachedOp->m_m44[i++] = token;
-                }
+                // Get dim attribute
+                cachedOp->fillVectorFromString(cachedOp->m_dim,
+                                               arrayElement->Attribute("dim"),
+                                               cachedOp->DIM_SIZE);
+                cachedOp->checkDimension();
+                // Get matrix values
+                cachedOp->fillVectorFromString(cachedOp->m_m44,
+                                               arrayElement->GetText(),
+                                               cachedOp->m_dim[1]);
 
                 return CachedOpRcPtr(cachedOp);
             }
