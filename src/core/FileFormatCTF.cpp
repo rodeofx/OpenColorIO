@@ -46,7 +46,9 @@ OCIO_NAMESPACE_ENTER
         class CachedOp
         {
         public:
-            virtual void buildFinalOp(OpRcPtrVec &ops, TransformDirection dir) = 0;
+            virtual void buildFinalOp(OpRcPtrVec &ops,
+                                      const Config& config,
+                                      TransformDirection dir) = 0;
         };
 
         typedef OCIO_SHARED_PTR<CachedOp> CachedOpRcPtr;
@@ -83,7 +85,9 @@ OCIO_NAMESPACE_ENTER
                 /// For example, the MatrixCachedOp contains just a float m_m44[16],
                 /// to store the elements of the matrix.
 
-                virtual void buildFinalOp(OpRcPtrVec &ops, TransformDirection dir) {
+                virtual void buildFinalOp(OpRcPtrVec &ops,
+                                          const Config& config,
+                                          TransformDirection dir) {
                     /// Turn the cached data into actual ops by passing the 
                     /// ops variable to a Create___Op function.
 
@@ -135,7 +139,9 @@ OCIO_NAMESPACE_ENTER
 
                 /// Turns the cached data into an Op and adds it to the vector of
                 /// Ops
-                virtual void buildFinalOp(OpRcPtrVec &ops, TransformDirection dir) {
+                virtual void buildFinalOp(OpRcPtrVec &ops,
+                                          const Config& config,
+                                          TransformDirection dir) {
                     CreateMatrixOp(ops, &m_m44[0], dir);
                 }
 
@@ -367,7 +373,7 @@ OCIO_NAMESPACE_ENTER
             // Iterate through the cached file ops
             for (int i = 0; i < cachedFile->m_cachedOps.size(); i++) {
                 CachedOpRcPtr thisOp = cachedFile->m_cachedOps[i];
-                thisOp->buildFinalOp(ops, dir);
+                thisOp->buildFinalOp(ops, config, dir);
             }
         }
     }
