@@ -201,10 +201,9 @@ OCIO_NAMESPACE_ENTER
                 MatrixCachedOp * cachedOp = new MatrixCachedOp;
 
                 // Find the Array XML tag
-                TiXmlElement *arrayElement = element->FirstChildElement();
-                while(arrayElement && arrayElement->ValueStr().compare("Array") != 0){
-                    arrayElement = arrayElement->NextSiblingElement();
-                };
+                TiXmlElement *arrayElement = TiXmlHandle(element).
+                                             FirstChildElement("Array").
+                                             ToElement();
 
                 if (!arrayElement){
                     std::ostringstream os;
