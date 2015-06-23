@@ -35,6 +35,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "FileTransform.h"
 #include "OpBuilders.h"
 #include "MatrixOps.h"
+#include "OpBuilders.h"
+#include "CDLTransform.h"
 
 OCIO_NAMESPACE_ENTER
 {
@@ -232,6 +234,37 @@ OCIO_NAMESPACE_ENTER
             }
         };
 
+        /// Handles <ASC_CDL> tags
+        // TODO Handle styles : Fwd, Rev, FwdNoClamp, RevNoClamp
+        class CDLTagHandler : public XMLTagHandler
+        {
+            class CDLCachedOp : public CachedOp
+            {
+            public:
+                CDLTransformRcPtr transform;
+
+                CDLCachedOp ()
+                {
+                    transform = CDLTransform::Create();
+                };
+
+                virtual void buildFinalOp(OpRcPtrVec &ops,
+                                          const Config& config,
+                                          TransformDirection dir) {
+                    BuildCDLOps(ops, config, *(this->transform), dir);
+                }
+            };
+
+            virtual CachedOpRcPtr handleXMLTag(TiXmlElement * element) {
+                CDLCachedOp * cachedOp = new CDLCachedOp;
+                // Rename ASC_CDL into ColorCorrection
+                element->SetValue("ColorCorrection");
+                // Load XML data into the transform
+                LoadCDL(cachedOp->transform.get(), element);
+                return CachedOpRcPtr(cachedOp);
+            }
+        };
+
         /// A factory method to instantiate an appropriate XMLTagHandler for a given
         /// tag name. For example, passing "matrix" to this function should instantiate
         /// and return a MatrixTagHandler.
@@ -239,6 +272,8 @@ OCIO_NAMESPACE_ENTER
         {
             if (text.compare("Matrix") == 0) {
                 return XMLTagHandlerRcPtr(new MatrixTagHandler());
+            }else if (text.compare("ASC_CDL") == 0) {
+                return XMLTagHandlerRcPtr(new CDLTagHandler());
             }
             return XMLTagHandlerRcPtr(static_cast<XMLTagHandler*>(NULL));
         }
