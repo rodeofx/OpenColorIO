@@ -48,6 +48,7 @@ OCIO_NAMESPACE_ENTER
         class CachedOp
         {
         public:
+            virtual ~CachedOp(){};
             virtual void buildFinalOp(OpRcPtrVec &ops,
                                       const Config& config,
                                       TransformDirection dir) = 0;
@@ -64,8 +65,8 @@ OCIO_NAMESPACE_ENTER
         class XMLTagHandler
         {
         public:
+            virtual ~XMLTagHandler(){};
             static XMLTagHandlerRcPtr CreateHandlerForTagName(std::string text);
-
             virtual CachedOpRcPtr handleXMLTag(TiXmlElement * element) = 0;
         };
 
@@ -84,8 +85,8 @@ OCIO_NAMESPACE_ENTER
             {
             public:
                 /// Data structures representing the operator go here.
-                /// For example, the MatrixCachedOp contains just a float m_m44[16],
-                /// to store the elements of the matrix.
+                /// For example, the MatrixCachedOp contains just a float
+                /// * m_m44[16], to store the elements of the matrix.
 
                 virtual void buildFinalOp(OpRcPtrVec &ops,
                                           const Config& config,
@@ -104,7 +105,7 @@ OCIO_NAMESPACE_ENTER
                 /// Read the ASCII data from the Tiny XML element representation
                 /// into the intermediate cached format.
                 /// For example, the MatrixTagHandler just converts the ASCII
-                /// values to floats and stores them in a MatrixCachedOp.               
+                /// values to floats and stores them in a MatrixCachedOp.
 
                 /// return CachedOpRcPtr(cachedOp);
             }
@@ -124,7 +125,7 @@ OCIO_NAMESPACE_ENTER
                 std::vector<unsigned short> m_dim;
                 std::vector<float> m_m44;
 
-                MatrixCachedOp() : DIM_SIZE(3), MTX_DIM(4), MTX_SIZE(16)
+                MatrixCachedOp() : DIM_SIZE(3), MTX_SIZE(16), MTX_DIM(4)
                 {
                     // Default values
                     const unsigned short default_dimension[] = {3, 3, 3};
@@ -139,10 +140,10 @@ OCIO_NAMESPACE_ENTER
                                        &default_matrix[0] + MTX_SIZE);
                 }
 
-                /// Turns the cached data into an Op and adds it to the vector of
-                /// Ops
+                /// Turns the cached data into an Op and adds it to the vector
+                /// of Ops
                 virtual void buildFinalOp(OpRcPtrVec &ops,
-                                          const Config& config,
+                                          const Config&,
                                           TransformDirection dir) {
                     CreateMatrixOp(ops, &m_m44[0], dir);
                 }
@@ -154,8 +155,8 @@ OCIO_NAMESPACE_ENTER
                                           const unsigned short inColSize)
                 {
                     std::istringstream is(str);
-                    int i = 0;
-                    int j = 1;
+                    unsigned int i = 0;
+                    unsigned int j = 1;
                     int delta = this->MTX_DIM - inColSize;
                     while (!is.eof() && i < v.size()) {
                         T token;
@@ -215,7 +216,8 @@ OCIO_NAMESPACE_ENTER
 
                 if (!arrayElement){
                     std::ostringstream os;
-                    os << "Matrix Parsing Error: could not find XML Array element !";
+                    os << "Matrix Parsing Error: could not find XML Array "
+                          "element !";
                     throw Exception(os.str().c_str());
                 }
 
@@ -265,10 +267,11 @@ OCIO_NAMESPACE_ENTER
             }
         };
 
-        /// A factory method to instantiate an appropriate XMLTagHandler for a given
-        /// tag name. For example, passing "matrix" to this function should instantiate
-        /// and return a MatrixTagHandler.
-        XMLTagHandlerRcPtr XMLTagHandler::CreateHandlerForTagName(std::string text)
+        /// A factory method to instantiate an appropriate XMLTagHandler for a
+        /// given tag name. For example, passing "matrix" to this function
+        /// should instantiate and return a MatrixTagHandler.
+        XMLTagHandlerRcPtr
+        XMLTagHandler::CreateHandlerForTagName(std::string text)
         {
             if (text.compare("Matrix") == 0) {
                 return XMLTagHandlerRcPtr(new MatrixTagHandler());
@@ -334,9 +337,10 @@ OCIO_NAMESPACE_ENTER
             std::ostringstream rawdata;
             rawdata << istream.rdbuf();
 
-            // We were asked to Read, so we should create a new cached file and fill it with
-            // data from the .ctf file.
-            LocalCachedFileRcPtr cachedFile = LocalCachedFileRcPtr(new LocalCachedFile());
+            // We were asked to Read, so we should create a new cached file and
+            // fill it with data from the .ctf file.
+            LocalCachedFileRcPtr cachedFile =
+                    LocalCachedFileRcPtr(new LocalCachedFile());
             
             // Create a TinyXML representation of the raw data we were given
             TiXmlDocumentRcPtr doc = TiXmlDocumentRcPtr(new TiXmlDocument());
@@ -362,11 +366,14 @@ OCIO_NAMESPACE_ENTER
                 std::string tagName = currentElement->Value();
 
                 // Create an XMLTagHandler to handle this specific tag
-                XMLTagHandlerRcPtr tagHandler = XMLTagHandler::CreateHandlerForTagName(tagName);
+                XMLTagHandlerRcPtr tagHandler =
+                        XMLTagHandler::CreateHandlerForTagName(tagName);
                 if (tagHandler) {
-                    CachedOpRcPtr cachedOp = tagHandler->handleXMLTag(currentElement);
+                    CachedOpRcPtr cachedOp = tagHandler->
+                            handleXMLTag(currentElement);
 
-                    // Store the CachedOp in our cached file, as we'll need it later
+                    // Store the CachedOp in our cached file, as we'll need it
+                    // later
                     cachedFile->m_cachedOps.push_back(cachedOp);
                 }
                 
@@ -385,7 +392,8 @@ OCIO_NAMESPACE_ENTER
                                       const FileTransform& fileTransform,
                                       TransformDirection dir) const
         {
-            LocalCachedFileRcPtr cachedFile = DynamicPtrCast<LocalCachedFile>(untypedCachedFile);
+            LocalCachedFileRcPtr cachedFile =
+                    DynamicPtrCast<LocalCachedFile>(untypedCachedFile);
             
             // This should never happen.
             if(!cachedFile)
@@ -406,7 +414,7 @@ OCIO_NAMESPACE_ENTER
             }
 
             // Iterate through the cached file ops
-            for (int i = 0; i < cachedFile->m_cachedOps.size(); i++) {
+            for (unsigned int i = 0; i < cachedFile->m_cachedOps.size(); i++){
                 CachedOpRcPtr thisOp = cachedFile->m_cachedOps[i];
                 thisOp->buildFinalOp(ops, config, dir);
             }
