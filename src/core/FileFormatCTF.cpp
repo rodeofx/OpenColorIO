@@ -26,6 +26,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+#include <algorithm>
 #include <tinyxml.h>
 #include <stdio.h>
 #include <vector>
@@ -38,6 +39,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "MatrixOps.h"
 #include "OpBuilders.h"
 #include "CDLTransform.h"
+#include "Lut1DOp.h"
 
 OCIO_NAMESPACE_ENTER
 {
@@ -352,6 +354,133 @@ OCIO_NAMESPACE_ENTER
             }
         };
 
+        /// Handles <LUT1D> tags
+        // TODO Handle advanced features : rawHalfs, halfDomain, IndexMap,
+        // inBitDepth
+        class Lut1DTagHandler : public XMLTagHandler
+        {
+            class Lut1DCachedOp : public CachedOp
+            {
+            public:
+                Interpolation interp;
+                Lut1DRcPtr lut;
+                std::vector<unsigned int> m_dim;
+
+                Lut1DCachedOp () : interp(INTERP_LINEAR)
+                {
+                    lut = Lut1D::Create();
+                    m_dim.reserve(3);
+                };
+
+                virtual void buildFinalOp(OpRcPtrVec &ops,
+                                          const Config&,
+                                          TransformDirection dir) {
+                    CreateLut1DOp(ops, this->lut, this->interp, dir);
+                }
+
+                template <typename T>
+                void fillLutFromString(std::vector<T> v[], const char * str,
+                                       const unsigned int & size,
+                                       const unsigned int & components)
+                {
+                    std::istringstream is(str);
+                    unsigned int i = 0;
+                    while (!is.eof() && i < size) {
+                        T token;
+                        is >> token;
+                        if (components == 1) {
+                            v[0].push_back(token);
+                            v[1].push_back(token);
+                            v[2].push_back(token);
+                        }else{
+                            v[0].push_back(token);
+                            is >> token;
+                            v[1].push_back(token);
+                            is >> token;
+                            v[2].push_back(token);
+                        }
+                        ++i;
+                    }
+                    checkParsing(size, i, is.eof());
+                }
+                void checkDimension()
+                {
+                    std::vector<unsigned int> valid_components;
+                    valid_components.push_back(1);
+                    valid_components.push_back(3);
+                    const unsigned int min_size = 2;
+                    const unsigned int max_size = 65536;
+
+                    if (std::find(valid_components.begin(),
+                                  valid_components.end(), this->m_dim[1]) !=
+                                  valid_components.end() &&
+                        this->m_dim[0] >= min_size &&
+                        this->m_dim[0] <= max_size
+                    )
+                        return;
+                    std::ostringstream os;
+                    os << "LUT1D Parsing Error: wrong dimension ("
+                       << this->m_dim[0] << "x" << this->m_dim[1] << " "
+                       << this->m_dim[2] <<  ")";
+                    throw Exception(os.str().c_str());
+                }
+            };
+
+            virtual CachedOpRcPtr handleXMLTag(TiXmlElement * element)
+            {
+                Lut1DCachedOp * cachedOp = new Lut1DCachedOp;
+
+                // Get and set LUT attributes
+                const char * ouBit = cachedOp->requiredAttribute(element,
+                                                                 "outBitDepth");
+
+                float from_min = 0;
+                float from_max = 1;
+                cachedOp->getMinMaxFromBitDepth(from_min, from_max, ouBit);
+
+                const char * interp = element->Attribute("interpolation");
+                if (interp)
+                    cachedOp->interp = cachedOp->getInterpFromString(interp);
+
+                // Find the Array XML tag
+                TiXmlElement *arrayElement = TiXmlHandle(element).
+                                             FirstChildElement("Array").
+                                             ToElement();
+
+                if (!arrayElement){
+                    std::ostringstream os;
+                    os << "LUT1D Parsing Error: could not find XML Array "
+                          "element !";
+                    throw Exception(os.str().c_str());
+                }
+
+                // Get LUT dimension
+                const char * dim = cachedOp->requiredAttribute(arrayElement,
+                                                               "dim");
+                cachedOp->fillVectorFromString(cachedOp->m_dim,
+                                               dim,
+                                               2);
+                cachedOp->checkDimension();
+
+                // Prepare Lut1D object
+                for(int i=0; i<3; ++i)
+                {
+                    cachedOp->lut->from_min[i] = from_min;
+                    cachedOp->lut->from_max[i] = from_max;
+                    cachedOp->lut->luts[i].clear();
+                    cachedOp->lut->luts[i].reserve(cachedOp->m_dim[0]);
+                }
+
+                // Fill LUTs from Array data
+                cachedOp->fillLutFromString(cachedOp->lut->luts,
+                                            arrayElement->GetText(),
+                                            cachedOp->m_dim[0],
+                                            cachedOp->m_dim[1]);
+
+                return CachedOpRcPtr(cachedOp);
+            }
+        };
+
         /// A factory method to instantiate an appropriate XMLTagHandler for a
         /// given tag name. For example, passing "matrix" to this function
         /// should instantiate and return a MatrixTagHandler.
@@ -362,6 +491,8 @@ OCIO_NAMESPACE_ENTER
                 return XMLTagHandlerRcPtr(new MatrixTagHandler());
             }else if (text.compare("ASC_CDL") == 0) {
                 return XMLTagHandlerRcPtr(new CDLTagHandler());
+            }else if (text.compare("LUT1D") == 0) {
+                return XMLTagHandlerRcPtr(new Lut1DTagHandler());
             }
             return XMLTagHandlerRcPtr(static_cast<XMLTagHandler*>(NULL));
         }
