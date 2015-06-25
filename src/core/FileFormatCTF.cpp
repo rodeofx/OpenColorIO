@@ -32,6 +32,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <OpenColorIO/OpenColorIO.h>
 
+#include "Logging.h"
 #include "FileTransform.h"
 #include "OpBuilders.h"
 #include "MatrixOps.h"
@@ -52,6 +53,90 @@ OCIO_NAMESPACE_ENTER
             virtual void buildFinalOp(OpRcPtrVec &ops,
                                       const Config& config,
                                       TransformDirection dir) = 0;
+
+            // Check if there is no inconstancy between what we expected and
+            // what we read.
+            // If not enough data was read, will raise.
+            // If more data exists, will log a warning.
+            void checkParsing(const unsigned int expected_size,
+                              const unsigned int read_size,
+                              const bool endOfFile)
+            {
+                if (read_size < expected_size) {
+                    std::ostringstream os;
+                    os << "Parsing Error: expected " << expected_size
+                       << " values but only " << read_size << " were read !";
+                    throw Exception(os.str().c_str());
+                }else if (!endOfFile) {
+                    std::ostringstream os;
+                    os << expected_size << " values were expected but there's "
+                          "more in the stream !";
+                    LogWarning(os.str());
+                }
+            }
+
+            // Read values from a string and push it in a vector
+            // Call checkParsing
+            template <typename T>
+            void fillVectorFromString(std::vector<T> &v, const char * str,
+                                      const unsigned short size)
+            {
+                std::istringstream is(str);
+                unsigned int i = 0;
+                while (!is.eof() && i < size) {
+                    T token;
+                    is >> token;
+                    v[i++] = token;
+                }
+                checkParsing(size, i, is.eof());
+            }
+
+            // Convert possible interpolation attribute into ocio equivalent
+            // Default interpolation is linear
+            Interpolation getInterpFromString(std::string str)
+            {
+                if (str.compare("nearest") == 0){
+                    return INTERP_NEAREST;
+                } else if (str.compare("tetrahedral") == 0){
+                    return INTERP_TETRAHEDRAL;
+                } else if (str.compare("best") == 0){
+                    return INTERP_BEST;
+                }
+                return INTERP_LINEAR;
+            }
+
+           // Convert possible bit depth values into min / max
+           // Possible bit depths : “8i”, “10i”, “12i”, “16i”, “16f” or “32f”
+           void getMinMaxFromBitDepth(float & min, float & max,std::string str)
+           {
+               size_t last = str.size() - 1;
+               char type = str[last];
+               // Float bit depth
+               if (type == 'f'){
+                   min = 0.0;
+                   max = 1.0;
+                   return;
+               }
+               // Int bit depth
+               const unsigned int bitDepth = atoi(str.substr(0, last).c_str());
+               min = 0.0;
+               max = static_cast<float>(pow(2, bitDepth) - 1);
+            }
+
+           // Get attribute of a TiXmlElement
+           // If the attribute does not exist will raise a proper exception
+           const char * requiredAttribute(TiXmlElement * element,
+                                          const char * attribute)
+           {
+               const char * value = element->Attribute(attribute);
+               if (!value) {
+                   std::ostringstream os;
+                   os << element->ValueStr() << " Parsing Error: " << attribute
+                      << " is a required attribute !";
+                   throw Exception(os.str().c_str());
+               }
+               return value;
+           }
         };
 
         typedef OCIO_SHARED_PTR<CachedOp> CachedOpRcPtr;
@@ -151,16 +236,19 @@ OCIO_NAMESPACE_ENTER
                 // Parse string to fill vector considering input data size
                 // Ex: fill the 4x4 matrix member with a 3x4 input matrix
                 template <typename T>
-                void fillVectorFromString(std::vector<T> &v, const char * str,
+                void fillMatrixFromString(std::vector<T> &v, const char * str,
                                           const unsigned short inColSize)
                 {
                     std::istringstream is(str);
                     unsigned int i = 0;
                     unsigned int j = 1;
                     int delta = this->MTX_DIM - inColSize;
-                    while (!is.eof() && i < v.size()) {
+                    unsigned int read = 0;
+                    unsigned int max_read = this->m_dim[0] * this->m_dim[1];
+                    while (!is.eof() && read < max_read) {
                         T token;
                         is >> token;
+                        ++ read;
                         v[i++] = token;
                         if (i >= inColSize*j + (j-delta))
                         {
@@ -168,12 +256,7 @@ OCIO_NAMESPACE_ENTER
                             ++j;
                         }
                     }
-                }
-
-                template <typename T>
-                void fillVectorFromString(std::vector<T> &v, const char * str)
-                {
-                    fillVectorFromString(v, str, v.size());
+                    this->checkParsing(max_read, read, is.eof());
                 }
 
                 // Check dimensions.
@@ -223,12 +306,14 @@ OCIO_NAMESPACE_ENTER
 
                 // Read the matrix tokens into our matrix array
                 // Get dim attribute
+                const char * dim = cachedOp->requiredAttribute(arrayElement,
+                                                               "dim");
                 cachedOp->fillVectorFromString(cachedOp->m_dim,
-                                               arrayElement->Attribute("dim"),
+                                               dim,
                                                cachedOp->DIM_SIZE);
                 cachedOp->checkDimension();
                 // Get matrix values
-                cachedOp->fillVectorFromString(cachedOp->m_m44,
+                cachedOp->fillMatrixFromString(cachedOp->m_m44,
                                                arrayElement->GetText(),
                                                cachedOp->m_dim[1]);
 
