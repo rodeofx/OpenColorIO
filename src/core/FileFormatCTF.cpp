@@ -330,17 +330,17 @@ OCIO_NAMESPACE_ENTER
             class CDLCachedOp : public CachedOp
             {
             public:
-                CDLTransformRcPtr transform;
+                CDLTransformRcPtr m_transform;
 
                 CDLCachedOp ()
                 {
-                    transform = CDLTransform::Create();
+                    m_transform = CDLTransform::Create();
                 };
 
                 virtual void buildFinalOp(OpRcPtrVec &ops,
                                           const Config& config,
                                           TransformDirection dir) {
-                    BuildCDLOps(ops, config, *(this->transform), dir);
+                    BuildCDLOps(ops, config, *(this->m_transform), dir);
                 }
             };
 
@@ -349,7 +349,7 @@ OCIO_NAMESPACE_ENTER
                 // Rename ASC_CDL into ColorCorrection
                 element->SetValue("ColorCorrection");
                 // Load XML data into the transform
-                LoadCDL(cachedOp->transform.get(), element);
+                LoadCDL(cachedOp->m_transform.get(), element);
                 return CachedOpRcPtr(cachedOp);
             }
         };
@@ -362,20 +362,20 @@ OCIO_NAMESPACE_ENTER
             class Lut1DCachedOp : public CachedOp
             {
             public:
-                Interpolation interp;
-                Lut1DRcPtr lut;
+                Interpolation m_interp;
+                Lut1DRcPtr m_lut;
                 std::vector<unsigned int> m_dim;
 
-                Lut1DCachedOp () : interp(INTERP_LINEAR)
+                Lut1DCachedOp () : m_interp(INTERP_LINEAR)
                 {
-                    lut = Lut1D::Create();
+                    m_lut = Lut1D::Create();
                     m_dim.reserve(3);
                 };
 
                 virtual void buildFinalOp(OpRcPtrVec &ops,
                                           const Config&,
                                           TransformDirection dir) {
-                    CreateLut1DOp(ops, this->lut, this->interp, dir);
+                    CreateLut1DOp(ops, this->m_lut, this->m_interp, dir);
                 }
 
                 template <typename T>
@@ -440,7 +440,7 @@ OCIO_NAMESPACE_ENTER
 
                 const char * interp = element->Attribute("interpolation");
                 if (interp)
-                    cachedOp->interp = cachedOp->getInterpFromString(interp);
+                    cachedOp->m_interp = cachedOp->getInterpFromString(interp);
 
                 // Find the Array XML tag
                 TiXmlElement *arrayElement = TiXmlHandle(element).
@@ -465,14 +465,14 @@ OCIO_NAMESPACE_ENTER
                 // Prepare Lut1D object
                 for(int i=0; i<3; ++i)
                 {
-                    cachedOp->lut->from_min[i] = from_min;
-                    cachedOp->lut->from_max[i] = from_max;
-                    cachedOp->lut->luts[i].clear();
-                    cachedOp->lut->luts[i].reserve(cachedOp->m_dim[0]);
+                    cachedOp->m_lut->from_min[i] = from_min;
+                    cachedOp->m_lut->from_max[i] = from_max;
+                    cachedOp->m_lut->luts[i].clear();
+                    cachedOp->m_lut->luts[i].reserve(cachedOp->m_dim[0]);
                 }
 
                 // Fill LUTs from Array data
-                cachedOp->fillLutFromString(cachedOp->lut->luts,
+                cachedOp->fillLutFromString(cachedOp->m_lut->luts,
                                             arrayElement->GetText(),
                                             cachedOp->m_dim[0],
                                             cachedOp->m_dim[1]);
