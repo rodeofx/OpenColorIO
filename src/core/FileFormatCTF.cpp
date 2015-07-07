@@ -77,7 +77,7 @@ OCIO_NAMESPACE_ENTER
                 }
             }
 
-            // Read values from a string and push it in a vector
+            // Read values from a string and push them in a vector
             // Call checkParsing
             template <typename T>
             void fillVectorFromString(std::vector<T> &v, const char * str,
@@ -91,6 +91,17 @@ OCIO_NAMESPACE_ENTER
                     v[i++] = token;
                 }
                 checkParsing(size, i, is.eof());
+            }
+
+            // Read one value from a string and return it
+            // Use fillVectorFromString
+            template <typename T>
+            void fillFromString(T &t, const char * str)
+            {
+                std::vector<T> v;
+                v.reserve(1);
+                this->fillVectorFromString(v, str, 1);
+                t = v[0];
             }
 
             // Convert possible interpolation attribute into ocio equivalent
@@ -109,10 +120,13 @@ OCIO_NAMESPACE_ENTER
 
            // Convert possible bit depth values into min / max
            // Possible bit depths : “8i”, “10i”, “12i”, “16i”, “16f” or “32f”
-           void getMinMaxFromBitDepth(float & min, float & max,std::string str)
+           void getBitDepthValues(float & min, float & max, unsigned int & size,
+                                  std::string str)
            {
                size_t last = str.size() - 1;
                char type = str[last];
+               const unsigned int bitDepth = atoi(str.substr(0, last).c_str());
+               size = (unsigned int)(pow(2, bitDepth));
                // Float bit depth
                if (type == 'f'){
                    min = 0.0;
@@ -120,10 +134,15 @@ OCIO_NAMESPACE_ENTER
                    return;
                }
                // Int bit depth
-               const unsigned int bitDepth = atoi(str.substr(0, last).c_str());
                min = 0.0;
-               max = static_cast<float>(pow(2, bitDepth) - 1);
-            }
+               max = static_cast<float>(size - 1);
+           }
+
+           void getMinMaxFromBitDepth(float & min, float & max,std::string str)
+           {
+               unsigned int size;
+               this->getBitDepthValues(min, max, size, str);
+           }
 
            // Get attribute of a TiXmlElement
            // If the attribute does not exist will raise a proper exception
@@ -481,6 +500,127 @@ OCIO_NAMESPACE_ENTER
             }
         };
 
+        /// Handles <Range> tags
+        class RangeTagHandler : public XMLTagHandler
+        {
+            class RangeCachedOp : public CachedOp
+            {
+            public:
+                Lut1DRcPtr m_lut;
+                float m_minIn;
+                float m_maxIn;
+                unsigned int m_sizeIn;
+                float m_minOut;
+                float m_maxOut;
+                unsigned int m_sizeOut;
+                bool m_clamp;
+
+                RangeCachedOp () : m_minIn(0.f), m_maxIn(1.f), m_sizeIn(4096),
+                                   m_minOut(0.f), m_maxOut(1.f), m_sizeOut(4096),
+                                   m_clamp(true)
+                {
+                    m_lut = Lut1D::Create();
+                };
+
+                // Helper function to set min / max values
+                void checkAndSetMinMax(const TiXmlElement * minElt,
+                                       const TiXmlElement * maxElt,
+                                       float & minValue, float & maxValue){
+                    if (minElt){
+                        this->fillFromString(minValue, minElt->GetText());
+                        if (!maxElt){
+                            std::ostringstream os;
+                            os << "Range Parsing Error: if "
+                               << minElt->ValueStr() << " is set, "
+                               << "max value must be too !" ;
+                            throw Exception(os.str().c_str());
+                        }
+                    }
+                    if (maxElt){
+                        this->fillFromString(maxValue, maxElt->GetText());
+                    }
+                }
+
+                virtual void buildFinalOp(OpRcPtrVec &ops,
+                                          const Config&,
+                                          TransformDirection dir) {
+                    // Processing out range
+                    float outRange[this->m_sizeOut];
+                    for (unsigned int i = 0 ; i < this->m_sizeOut ; i++)
+                    {
+                        outRange[i] = (float) i * (this->m_maxOut -
+                                                   this->m_minOut) /
+                                      (float) this->m_sizeOut + this->m_minOut;
+                        if (this->m_clamp)
+                            outRange[i] = std::min(this->m_maxOut,
+                                                   std::max(this->m_minOut,
+                                                            outRange[i]));
+                    }
+                    for (int c = 0; c < 3; ++c)
+                    {
+                        // Using from_min, from_max to set the right in range
+                        this->m_lut->from_min[c] = this->m_minIn;
+                        this->m_lut->from_max[c] = this->m_maxIn;
+                        this->m_lut->luts[c].clear();
+                        this->m_lut->luts[c].reserve(this->m_sizeOut);
+                        // Assign out range to the LUT vectors
+                        this->m_lut->luts[c].assign(outRange,
+                                                    outRange + this->m_sizeOut);
+                    }
+                    CreateLut1DOp(ops, this->m_lut, INTERP_LINEAR, dir);
+                }
+            };
+
+            virtual CachedOpRcPtr handleXMLTag(TiXmlElement * element)
+            {
+                RangeCachedOp * cachedOp = new RangeCachedOp;
+
+                // Get in/out bit depth attributes
+                const char * inBit = cachedOp->requiredAttribute(element,
+                                                                 "inBitDepth");
+                const char * ouBit = cachedOp->requiredAttribute(element,
+                                                                 "outBitDepth");
+                // Set default bit depths min / max
+                cachedOp->getBitDepthValues(cachedOp->m_minIn,
+                                            cachedOp->m_maxIn,
+                                            cachedOp->m_sizeIn,
+                                            inBit);
+                cachedOp->getBitDepthValues(cachedOp->m_minOut,
+                                            cachedOp->m_maxOut,
+                                            cachedOp->m_sizeOut,
+                                            ouBit);
+
+                // Adjust min / max considering present XML elements
+                TiXmlElement * minInElt = TiXmlHandle(element).
+                                              FirstChildElement("minInValue").
+                                              ToElement();
+                TiXmlElement * maxInElt = TiXmlHandle(element).
+                                              FirstChildElement("maxInValue").
+                                              ToElement();
+                TiXmlElement * minOutElt = TiXmlHandle(element).
+                                               FirstChildElement("minOutValue").
+                                               ToElement();
+                TiXmlElement  * maxOutElt = TiXmlHandle(element).
+                                                FirstChildElement("maxOutValue").
+                                                ToElement();
+
+                cachedOp->checkAndSetMinMax(minInElt, maxInElt,
+                                            cachedOp->m_minIn,
+                                            cachedOp->m_maxIn);
+                cachedOp->checkAndSetMinMax(minOutElt, maxOutElt,
+                                            cachedOp->m_minOut,
+                                            cachedOp->m_maxOut);
+
+                // Get style attribute
+                const char * style = element->Attribute("style");
+                if (style && ((std::string)style).compare("noClamp") == 0){
+                    cachedOp->m_clamp = false;
+                }
+
+                return CachedOpRcPtr(cachedOp);
+            }
+        };
+
         /// A factory method to instantiate an appropriate XMLTagHandler for a
         /// given tag name. For example, passing "matrix" to this function
         /// should instantiate and return a MatrixTagHandler.
@@ -493,6 +633,8 @@ OCIO_NAMESPACE_ENTER
                 return XMLTagHandlerRcPtr(new CDLTagHandler());
             }else if (text.compare("LUT1D") == 0) {
                 return XMLTagHandlerRcPtr(new Lut1DTagHandler());
+            }else if (text.compare("Range") == 0) {
+                return XMLTagHandlerRcPtr(new RangeTagHandler());
             }
             return XMLTagHandlerRcPtr(static_cast<XMLTagHandler*>(NULL));
         }
