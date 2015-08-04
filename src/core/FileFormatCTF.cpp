@@ -40,6 +40,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "OpBuilders.h"
 #include "CDLTransform.h"
 #include "Lut1DOp.h"
+#include "Lut3DOp.h"
+
 
 OCIO_NAMESPACE_ENTER
 {
@@ -500,6 +502,157 @@ OCIO_NAMESPACE_ENTER
             }
         };
 
+        /// Handles <LUT3D> tags
+        /// Handle advanced features : IndexMap, inBitDepth
+        class Lut3DTagHandler : public XMLTagHandler
+        {
+            class Lut3DCachedOp : public CachedOp
+            {
+            public:
+                Interpolation m_interp;
+                Lut3DRcPtr m_lut;
+                std::vector<unsigned int> m_dim;
+
+                Lut3DCachedOp () : m_interp(INTERP_TETRAHEDRAL)
+                {
+                    m_lut = Lut3D::Create();
+                    m_dim.reserve(4);
+                };
+
+                virtual void buildFinalOp(OpRcPtrVec &ops,
+                                          const Config&,
+                                          TransformDirection dir) {
+                    CreateLut3DOp(ops, this->m_lut, this->m_interp, dir);
+                }
+
+                template <typename T>
+                void fillLutFromString(std::vector<T> &v, const char * str,
+                                       const unsigned int & size,
+                                       const float normScale)
+                {
+                    // Getting raw data
+                    std::istringstream is(str);
+                    unsigned int i = 0;
+                    std::vector<T> raw;
+                    while (!is.eof() && i < size) {
+                        T token;
+                        is >> token;
+                        raw.push_back(token);
+                        ++i;
+                    }
+                    checkParsing(size, i, is.eof());
+
+                    // Filling the op LUT in the right order
+                    for(unsigned int rIndex=0 ; rIndex < this->m_dim[0] ;
+                        ++rIndex)
+                    {
+                        for(unsigned int gIndex=0 ; gIndex < this->m_dim[1];
+                            ++gIndex)
+                        {
+                            for(unsigned int bIndex=0 ; bIndex < this->m_dim[2];
+                                ++bIndex)
+                            {
+                                int index = GetLut3DIndex_B(rIndex, gIndex,
+                                                            bIndex,
+                                                            this->m_dim[0],
+                                                            this->m_dim[1],
+                                                            this->m_dim[2]);
+
+                                v.push_back(raw[index + 0] * normScale);
+                                v.push_back(raw[index + 1] * normScale);
+                                v.push_back(raw[index + 2] * normScale);
+                            }
+                        }
+                    }
+                }
+
+                void checkDimension()
+                {
+                    const unsigned int min_size = 2;
+                    const unsigned int max_size = 128;
+
+                    if (this->m_dim[0] == this->m_dim[1] &&
+                        this->m_dim[1] == this->m_dim[2] &&
+                        this->m_dim[3] == 3){
+                        bool invalid = false;
+                        for(int i=0; i<3; ++i)
+                        {
+                            if (this->m_dim[i] < min_size &&
+                                this->m_dim[i] > max_size){
+                                invalid = true;
+                                break;
+                            }
+                        }
+                        if (!invalid)
+                            return;
+                    }
+                    std::ostringstream os;
+                    os << "LUT3D Parsing Error: wrong dimension ("
+                       << this->m_dim[0] << "x" << this->m_dim[1] << "x"
+                       << this->m_dim[2] << " " << this->m_dim[3] <<  ")";
+                    throw Exception(os.str().c_str());
+                }
+            };
+
+            virtual CachedOpRcPtr handleXMLTag(TiXmlElement * element)
+            {
+                Lut3DCachedOp * cachedOp = new Lut3DCachedOp;
+
+                // Get and set LUT attributes
+                const char * ouBit = cachedOp->requiredAttribute(element,
+                                                                 "outBitDepth");
+
+                float from_min = 0;
+                float from_max = 1;
+                cachedOp->getMinMaxFromBitDepth(from_min, from_max, ouBit);
+
+                const char * interp = element->Attribute("interpolation");
+                if (interp)
+                    cachedOp->m_interp = cachedOp->getInterpFromString(interp);
+
+                // Find the Array XML tag
+                TiXmlElement * arrayElement = TiXmlHandle(element).
+                                              FirstChildElement("Array").
+                                              ToElement();
+
+                if (!arrayElement){
+                    std::ostringstream os;
+                    os << "LUT3D Parsing Error: could not find XML Array "
+                          "element !";
+                    throw Exception(os.str().c_str());
+                }
+
+                // Get LUT dimension
+                const char * dim = cachedOp->requiredAttribute(arrayElement,
+                                                               "dim");
+                cachedOp->fillVectorFromString(cachedOp->m_dim,
+                                               dim,
+                                               4);
+                cachedOp->checkDimension();
+
+                // Prepare Lut3D object
+                cachedOp->m_lut->size[0] = cachedOp->m_dim[0];
+                cachedOp->m_lut->size[1] = cachedOp->m_dim[1];
+                cachedOp->m_lut->size[2] = cachedOp->m_dim[2];
+
+                const unsigned int finalSize = cachedOp->m_dim[0] *
+                                               cachedOp->m_dim[1] *
+                                               cachedOp->m_dim[2] *
+                                               cachedOp->m_dim[3];
+
+                cachedOp->m_lut->lut.reserve(finalSize);
+
+                // Fill LUTs from Array data
+                const float normScale = 1.0f / from_max;
+                cachedOp->fillLutFromString(cachedOp->m_lut->lut,
+                                            arrayElement->GetText(),
+                                            finalSize,
+                                            normScale);
+
+                return CachedOpRcPtr(cachedOp);
+            }
+        };
+
         /// Handles <Range> tags
         class RangeTagHandler : public XMLTagHandler
         {
@@ -633,6 +786,8 @@ OCIO_NAMESPACE_ENTER
                 return XMLTagHandlerRcPtr(new CDLTagHandler());
             }else if (text.compare("LUT1D") == 0) {
                 return XMLTagHandlerRcPtr(new Lut1DTagHandler());
+            }else if (text.compare("LUT3D") == 0) {
+                return XMLTagHandlerRcPtr(new Lut3DTagHandler());
             }else if (text.compare("Range") == 0) {
                 return XMLTagHandlerRcPtr(new RangeTagHandler());
             }
