@@ -33,6 +33,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <OpenColorIO/OpenColorIO.h>
 
+//TODO add libHalf properly in the build
+#include "half/half.h"
+
 #include "Logging.h"
 #include "FileTransform.h"
 #include "OpBuilders.h"
@@ -49,6 +52,22 @@ OCIO_NAMESPACE_ENTER
     
     namespace
     {
+        // Return the unsigned 16 int value corresponding to the same bit
+        // pattern than the input half
+        unsigned short halfToUInt16(half h)
+        {
+            return h.bits();
+        }
+
+        // Return the half value corresponding to the same bit pattern than
+        // the input unsigned 16 int
+        half uint16ToHalf(unsigned short s)
+        {
+            half h;
+            h.setBits(s);
+            return h;
+        }
+
         /// An internal Op cache that has been read from a CTF file.
         class CachedOp
         {
