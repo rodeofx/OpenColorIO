@@ -139,6 +139,14 @@ OCIO_NAMESPACE_ENTER
                 return INTERP_LINEAR;
             }
 
+            // Convert a string value into a bool value
+            bool getBoolFromString(std::string str)
+            {
+                if (str.compare("true") == 0)
+                    return true;
+                return false;
+            }
+
            // Convert possible bit depth values into min / max
            // Possible bit depths : “8i”, “10i”, “12i”, “16i”, “16f” or “32f”
            void getBitDepthValues(float & min, float & max, unsigned int & size,
@@ -405,8 +413,9 @@ OCIO_NAMESPACE_ENTER
                 Interpolation m_interp;
                 Lut1DRcPtr m_lut;
                 std::vector<unsigned int> m_dim;
+                bool rawHalfs;
 
-                Lut1DCachedOp () : m_interp(INTERP_LINEAR)
+                Lut1DCachedOp () : m_interp(INTERP_LINEAR), rawHalfs(false)
                 {
                     m_lut = Lut1D::Create();
                     m_dim.reserve(3);
@@ -502,6 +511,27 @@ OCIO_NAMESPACE_ENTER
                                                2);
                 cachedOp->checkDimension();
 
+                // Get rawHalfs attribute
+                const char * rawHalfs = element->Attribute("rawHalfs");
+                if (rawHalfs)
+                {
+                    cachedOp->rawHalfs = cachedOp->getBoolFromString(rawHalfs);
+                    if (cachedOp->rawHalfs)
+                    {
+                        if (from_max != 65535)
+                        {
+                            std::ostringstream os;
+                            os << "LUT1D Attribute Error: rawHalfs attribute "
+                                  "is not allowed with an outbit depth "
+                                  "different from 16bit int !";
+                            throw Exception(os.str().c_str());
+                        }
+                        // The final LUT is float
+                        from_min = 0.0f;
+                        from_max = 1.0f;
+                    }
+                }
+
                 // Prepare Lut1D object
                 for(int i=0; i<3; ++i)
                 {
@@ -511,11 +541,24 @@ OCIO_NAMESPACE_ENTER
                     cachedOp->m_lut->luts[i].reserve(cachedOp->m_dim[0]);
                 }
 
+
                 // Fill LUTs from Array data
                 cachedOp->fillLutFromString(cachedOp->m_lut->luts,
                                             arrayElement->GetText(),
                                             cachedOp->m_dim[0],
                                             cachedOp->m_dim[1]);
+
+                // Convert uint16 to half float if rawHalfs option is used
+                if (cachedOp->rawHalfs)
+                {
+                    for (unsigned int i=0 ; i < cachedOp->m_dim[0] ; ++i)
+                    {
+                        for (unsigned int j=0 ; j < 3 ; ++j)
+                        cachedOp->m_lut->luts[j][i] =
+                                uint16ToHalf((unsigned short)
+                                             (cachedOp->m_lut->luts[j][i]));
+                    }
+                }
 
                 return CachedOpRcPtr(cachedOp);
             }
